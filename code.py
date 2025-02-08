@@ -151,9 +151,9 @@ def message(client, topic, message):
     if topic == 'plant-humidity':
         humidity = round(float(message))
         humid_text.text = f"{humidity} %"
-    if topic == 'plant-gas-index':
+    if topic == 'plant-co2':
         gas = round(float(message))
-        gas_text.text = f"{gas} \u03a9"
+        gas_text.text = f"{gas} ppm"
     time_text.text = f"Last updated at {hour}:{minute:02} {am_pm}"
 
 # Initialize an Adafruit IO MQTT Client
@@ -179,7 +179,7 @@ tick = clock[5]
 minute = clock[4]
 
 # Subsribe to AIO feeds and get initial value
-for feed in ['plant-temperature', 'plant-humidity','plant-gas-index']:
+for feed in ['plant-temperature', 'plant-humidity','plant-co2']:
     io.subscribe(feed)
     io.get(feed)
 
