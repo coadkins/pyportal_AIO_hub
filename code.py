@@ -1,6 +1,5 @@
 import adafruit_connection_manager
 import adafruit_imageload
-import adafruit_minimqtt.adafruit_minimqtt as MQTT
 import adafruit_requests
 import board
 import busio
@@ -9,7 +8,7 @@ import neopixel
 import os
 import terminalio
 import time
-from adafruit_io.adafruit_io import IO_MQTT, IO_HTTP
+from adafruit_io.adafruit_io import IO_HTTP
 from adafruit_bitmap_font import bitmap_font
 from adafruit_display_text import (bitmap_label,
                                    label)
@@ -102,19 +101,12 @@ pool = adafruit_connection_manager.get_radio_socketpool(esp)
 ssl_context = adafruit_connection_manager.get_radio_ssl_context(esp)
 requests = adafruit_requests.Session(pool, ssl_context)
 
-# Initialize a new MQTT Client object
-mqtt_client = MQTT.MQTT(broker="io.adafruit.com",
-                        username=aio_username,
-                        password=aio_password,
-                        socket_pool=pool,
-                        ssl_context=ssl_context)
-
 # Initialize a new HTTP client for updating the time
-http_client = IO_HTTP(aio_username, aio_password, requests)
+io = IO_HTTP(aio_username, aio_password, requests)
 
 # some helper functions to update time and convert to 12-hour clock
 def update_time():
-    now = http_client.receive_time()
+    now = io.receive_time()
     return now
 
 def convert_time(the_time):
@@ -128,47 +120,14 @@ def convert_time(the_time):
         h = 12
     return h, a
 
-# Adafruit IO Callback Methods
-def connected(client):
-    # Connected function will be called when the client is connected to Adafruit IO.
-    print('Connected to Adafruit IO!')
-
-def subscribe(client, userdata, topic, granted_qos):
-    # This method is called when the client subscribes to a new feed.
-    print('Subscribed to {0} with QOS level {1}'.format(topic, granted_qos))
-
-# pylint: disable=unused-argument
-def disconnected(client):
-    # Disconnected function will be called if the client disconnects
-    # from the Adafruit IO MQTT broker.
-    print("Disconnected from Adafruit IO!")
-
-def message(client, topic, message):
-    print('Feed {0} received new value: {1}'.format(topic, message))
-    if topic == 'plant-temperature':
-        temp = round((1.8*float(message)) + 32)
-        temp_text.text = f"{temp} F°"
-    if topic == 'plant-humidity':
-        humidity = round(float(message))
-        humid_text.text = f"{humidity} %"
-    if topic == 'plant-co2':
-        gas = round(float(message))
-        gas_text.text = f"{gas} ppm"
+def update_values():
+    temp = round((1.8*float(io.receive_data(temp_feed["key"])["value"]) + 32))
+    temp_text.text = f"{temp} F°"
+    humidity = round(float(io.receive_data(hum_feed["key"])["value"]))
+    humid_text.text = f"{humidity} %"
+    gas = round(float(io.receive_data(co2_feed["key"])["value"]))
+    gas_text.text = f"{gas} ppm"
     time_text.text = f"Last updated at {hour}:{minute:02} {am_pm}"
-
-# Initialize an Adafruit IO MQTT Client
-io = IO_MQTT(mqtt_client)
-
-# Connect the callback methods defined above to the Adafruit IO MQTT Client
-io.on_connect = connected
-io.on_subscribe = subscribe
-io.on_message = message
-io.on_disconnect = disconnected
-
-# Connect to Adafruit IO
-print("Connecting to Adafruit IO...")
-io.connect()
-print("Connected!")
 
 # initial reference time
 clock_timer = 1 * 1000
@@ -178,19 +137,21 @@ hour, am_pm = convert_time(clock)
 tick = clock[5]
 minute = clock[4]
 
-# Subsribe to AIO feeds and get initial value
-for feed in ['plant-temperature', 'plant-humidity','plant-co2']:
-    io.subscribe(feed)
-    io.get(feed)
+# Get initial values
+co2_feed = io.get_feed("plant-co2")
+hum_feed = io.get_feed("plant-humidity")
+temp_feed = io.get_feed("plant-temperature")
+update_clock = ticks_ms()
+update_values()
 
 # turn off status light
 status_light.fill((0, 0, 0))
 
 while True:
-    # Explicitly pump the message loop
-    # to keep the connection active
     try:
-        io.loop()
+        if ticks_diff(ticks_ms(), update_clock) >= 10*1000:
+            update_values()
+            update_clock = ticks_add(update_clock, 10*1000)
         display.refresh()
     except (ValueError, RuntimeError, ConnectionError, OSError) as e:
         print("Failed to get data, retrying...\n", e)
@@ -206,5 +167,4 @@ while True:
                 hour, am_pm = convert_time(clock)
                 tick = clock[5]
                 minute = clock[4]
-    clock_clock = ticks_add(clock_clock, clock_timer)
-    time.sleep(0.5)
+        clock_clock = ticks_add(clock_clock, clock_timer)
